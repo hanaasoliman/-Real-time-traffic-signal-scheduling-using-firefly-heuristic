@@ -1,0 +1,268 @@
+# main liberaries
+from random import *
+import numpy as np
+from gurobipy import *
+import pandas as pd
+import xlrd
+import xlwt
+from xlwt import Workbook
+import csv
+import math
+import time
+import matplotlib.pyplot as plt
+wb = Workbook()
+sheet1 = wb.add_sheet('Sheet 1')
+# starting time
+start = time.time()
+# Reading PIBJ and FLow from Excel Files
+book = xlrd.open_workbook('C:\\Users\\datasheet1.xls',on_demand=True)
+sh1 = book.sheet_by_name("PIBJ")
+sh2 = book.sheet_by_name("Flow")
+sh3 = book.sheet_by_name("per")
+PIBJ = []
+Flow = []
+m = 0
+while True:
+    try:
+        c = sh3.cell_value(m, 0)
+        PIBJ.append(c)
+        m = m + 1
+    except IndexError:
+        break
+ii = 0
+while True:
+    try:
+        bb = sh2.cell_value(ii, 0)
+        Flow.append(bb)
+        ii = ii + 1
+    except IndexError:
+        break
+TPS = 2160 # Time Periods to be studied
+Flow = np.array(Flow) # this is the actual flow
+Flow = Flow.reshape(4,TPS)
+Flow1 = np.zeros(shape=(16, TPS)) # this is the flow that is used int he calculations
+PIBJ = np.array(PIBJ)
+PIBJ = PIBJ.reshape(16,3)
+
+# Inputs to the problem
+TrafficLights = [1, 2, 3]
+Time = list(range(1, TPS+1))
+
+Roads = [1, 2, 3, 4]
+Vehciles = [1]
+k = len(Vehciles)
+print(len(Vehciles))
+C_max = 16  # cycle time
+C_min = 4  # min working time for a traffic light
+possible = np.array(
+    [[1, 1, 1, 1, 2, 3], [2, 3, 1, 1, 1, 1], [1, 1, 3, 1, 2, 1],
+     [2, 1, 1, 3, 1, 1]]) # the set of all possible TL phases without confliects
+
+
+flow = np.zeros(shape=(C_min,))
+# creating an empty array and a sol1 matrix
+sol=np.zeros(shape=(len(Roads),TPS+1)) # the matrix of the complete solution
+sol1 = np.zeros(shape=(len(Roads), C_max)) # the matrix of the best cycle solution
+pop = 5 # population size
+SOLUTIONS=np.zeros(shape=(C_min*pop,TPS+1))
+for kk in range(0,pop): #
+    sol = np.zeros(shape=(len(Roads), TPS+1))  # the matrix of the complete solution
+    for h in range(0, TPS, C_max):
+        best_in_itr = np.zeros(shape=(3, 69)) # this matrix is to record the 5 solution, then the best will be selected later
+       
+        for g in range(0, 3):
+            # Generation of solution
+            sol1 = np.zeros(shape=(len(Roads), C_max))  # the matrix of the best cycle solution
+            RR = choice([C_min, C_min])
+            for i in range(0, sol1.shape[1], RR):
+                seed(randint(1, 100))
+                WTL = randint(1, 6)  # Which TL pattern will be selected from possible array, we have ٦ patterns
+                for j in range(i, i + RR):
+                    sol1[:, j] = possible[:, WTL - 1]
+            # quality determination
+            kTT = np.zeros(shape=(len(Roads),))
+            w = np.zeros(shape=(len(Roads), C_max))
+            sTT = np.zeros(shape=(C_max,))
+            TkTT = np.zeros(shape=(C_min,))
+            TwTT = np.zeros(shape=(C_min,))
+            TsTT = np.zeros(shape=(C_min,))
+            TTwTT = np.zeros(shape=(C_min, C_max))
+            Total_wT = 0
+            for i in range(0, 4):
+                Flow1[i * 4:i * 4 + 4, :] = Flow[i, :]
+            if h!=0:
+                for i in range(0, 4):
+                    Flow1[i * 4:i * 4 + 4, h] = flow[i]
+            for x in range(0, len(Roads)):
+                u=0
+                for y in range(h, h+C_max):
+                    z = sol1[x, u] - 1 # to use it in index, TLs 1 2 3 are 0 1 2 respectively
+                    z = z.astype(int) # convert z to int in order to put it as index in the matrix
+
+                    #-----This part is to accumulate "the total out from each road"-----#
+                    TkTT[x] = sum((np.array(PIBJ[x * 4:x * 4 + C_min, z])) * (np.array(Flow1[x * 4:x * 4 + C_min, y]))) # total out from each road
+                    #-------------------end of the previous part---------------------#
+
+                    # -----This part is to accumulate "the total wait at each road"-----#
+                    TwTT[x] = Flow1[x * 4, y] - TkTT[x] # wait at each road
+                    TTwTT[x, u] = Flow1[x * 4, y] - TkTT[x]
+                    # -------------------end of the previous part---------------------#
+
+                    # In the part, it is a must to have a condition in order not to violate he maximum time
+                    if y!=TPS-1:
+                        Flow1[x * 4:x * 4 + C_min, y+1] = (Flow1[x * 4:x * 4 + C_min, y+1]) + TwTT[x]*(np.ones(shape=(C_min,)))
+                    # -------------------end of the previous part---------------------#
+
+                    u = u+1
+            Total_wT = sum(sum(TTwTT))
+            Total_wT=Total_wT
+            flow = np.zeros(shape=(C_min,))
+            if y != 2159:
+                for a in range(0, C_min):
+                    flow[a]=Flow1[a*C_min,y+1]
+            sol2 = np.array(sol1)
+            sol2 = sol1.reshape(1,64)
+            best_in_itr[g,0:64]=sol2
+            best_in_itr[g,64:68]=flow.reshape(1,4)
+            best_in_itr[g,68]=Total_wT
+        # Sort best_in_itr
+        BEST = best_in_itr[best_in_itr[:, -1].argsort()] # this is the matrix of the sorted (best_in_itr)
+        best_in_best = BEST[0,0:64]
+        best_in_best = best_in_best.reshape(4,16)
+        sol[:,h:h+C_max] = best_in_best
+        sol[:,TPS] = sol[:,TPS] + BEST[0,68]
+        SOLUTIONS[kk*C_min:kk*C_min+C_min, :] = sol
+
+# sort the SOLUTIONS matrix
+
+SOLUTIONS1 = SOLUTIONS[:, 0:TPS]
+FFSOLUTIONS1 = np.zeros(shape=(pop,1))
+for k in range (0, pop):
+    FFSOLUTIONS1[k,0] = SOLUTIONS[k*C_min, TPS]
+SOLUTIONS1 = SOLUTIONS1.reshape(pop,TPS*len(Roads))
+SOLUTIONS1 =np.concatenate((SOLUTIONS1,FFSOLUTIONS1),axis=1)
+SOLUTIONS1 = SOLUTIONS1[SOLUTIONS1[:, -1].argsort()] # This matrix include the solutions in order
+# Best solution
+best_sol_H = SOLUTIONS1[0,0:TPS*len(Roads)]
+best_sol_V = best_sol_H.reshape(4,TPS)
+
+# Algorithm
+itr = 500 # this is the number of iterations
+SOLUTIONS2 = SOLUTIONS1
+BBB = np.zeros(shape=(itr, C_min * TPS + 1))
+B_So_Far = np.zeros(shape=(1, C_min*TPS + 1))
+B_So_Far_1 = np.zeros(shape=(1, C_min*TPS + 1))
+B_So_Far[0, C_min*TPS] = 1000000
+DRAW = np.zeros(shape=(itr, 1))
+for N in range(0, itr):
+    # prepare a difference matrix
+    SOLUTIONS2 = SOLUTIONS1
+    diff_array=np.zeros(shape=(pop,TPS*len(Roads)+2))
+    for i in range(0, pop):
+        diff_array[i, 0:TPS*len(Roads)] = SOLUTIONS1[0, 0:TPS*len(Roads)] - SOLUTIONS1[i, 0:TPS*len(Roads)]
+        diff_array[i, TPS*len(Roads)] = SOLUTIONS1[i, TPS*len(Roads)] - SOLUTIONS1[0, TPS*len(Roads)]
+        diff_array[i, TPS*len(Roads)+1] = sum(abs(diff_array[i, 0:TPS*len(Roads)]))
+    list_of_random = list(range(0, TPS, C_min)) # list of random time slots to be selected
+    pro_s = 0.9 # pre-specified probability
+    for i in range(0, pop):
+        if diff_array[i, C_min * TPS] > 0:
+            bk = 0
+            while bk < 20:
+                ll = np.random.choice(list_of_random)
+                if diff_array[i, ll] > 0:
+                    pro_g = np.random.uniform()  # generated probability to be compared with another probability
+                    if pro_g >= pro_s:
+                        for mk in range(0, 4 * TPS, TPS):
+                            SOLUTIONS2[i, ll + mk] = SOLUTIONS2[i, ll + mk] + diff_array[i, ll + mk]
+                            SOLUTIONS2[i, (ll + 1) + mk] = SOLUTIONS2[i, (ll + 1) + mk] + diff_array[i, (ll + 1) + mk]
+                            SOLUTIONS2[i, (ll + 2) + mk] = SOLUTIONS2[i, (ll + 2) + mk] + diff_array[i, (ll + 2) + mk]
+                            SOLUTIONS2[i, (ll + 3) + mk] = SOLUTIONS2[i, (ll + 3) + mk] + diff_array[i, (ll + 3) + mk]
+                            diff_array[i, 0:TPS * len(Roads)] = SOLUTIONS1[0, 0:TPS * len(Roads)] - SOLUTIONS2[i,0:TPS * len(Roads)]
+                            diff_array[i, TPS * len(Roads)] = SOLUTIONS2[i, TPS * len(Roads)] - SOLUTIONS1[0, TPS * len(Roads)]
+                            diff_array[i, TPS * len(Roads) + 1] = sum(abs(diff_array[i, 0:TPS * len(Roads)]))
+                bk = bk + 1
+        else:
+            continue
+    SOLUTIONS2 = SOLUTIONS2[:, 0:C_min * TPS]
+    SOLUTIONS2 = SOLUTIONS2.reshape((len(Roads)*pop), TPS)
+    SOLUTIONS4 = np.zeros(shape=(pop, C_min * TPS + 1))
+    for x in range(0, C_min * pop, C_min):
+        SOLUTIONS3 = SOLUTIONS2[x:x+C_min, :]
+        TkTT_1 = np.zeros(shape=(C_min,))
+        TwTT_1 = np.zeros(shape=(C_min,))
+        TsTT_1 = np.zeros(shape=(C_min,))
+        TTwTT_1 = np.zeros(shape=(C_min, TPS))
+        Total_wT_1 = 0
+        for i in range(0, 4):
+            Flow1[i * 4:i * 4 + 4, :] = Flow[i, :]
+        for i in range(0, len(Roads)):
+            for y in range(0, TPS):
+                z = SOLUTIONS3[i, y] - 1  # to use it in index, TLs 1 2 3 are 0 1 2 respectively
+                z = z.astype(int)  # convert z to int in order to put it as index in the matrix
+                TkTT_1[i] = sum((np.array(PIBJ[i * 4:i * 4 + C_min, z])) * (np.array(Flow1[i * 4:i * 4 + C_min, y])))  # total out from each road
+
+                TwTT_1[i] = Flow1[i * 4, y] - TkTT_1[i]  # wait at each road
+                TTwTT_1[i, y] = Flow1[i * 4, y] - TkTT_1[i]
+
+                if y != TPS - 1:
+                    Flow1[i * 4:i * 4 + C_min, y + 1] = (Flow1[i * 4:i * 4 + C_min, y + 1]) + TwTT_1[i] * (np.ones(shape=(C_min,)))
+        Total_wT_1 = sum(sum(TTwTT_1))
+        #Total_wT_1 = Total_wT_1
+        pp = int(x/C_min)
+        SOLUTIONS4[pp, 0:C_min * TPS] = SOLUTIONS3.reshape(1, C_min * TPS)
+        SOLUTIONS4[pp, C_min * TPS] = Total_wT_1
+    # sort the solutions
+    SOLUTIONS1 = SOLUTIONS4[SOLUTIONS4[:, -1].argsort()] # This matrix include the solutions in order
+    # Best solution
+    BBB[N, :] = SOLUTIONS1[0, :]
+    B_So_Far_1[0, :] = SOLUTIONS1[0, :]
+    if N > 0:
+        if B_So_Far_1[0, C_min * TPS] < B_So_Far[0, C_min * TPS]:
+            B_So_Far = B_So_Far_1
+            DRAW[N, 0] = B_So_Far[0, 8640]
+        else:
+            B_So_Far = B_So_Far
+            DRAW[N, 0] = B_So_Far[0, 8640]
+    if N > 0:
+        plt.title("Convergence curve")
+        plt.xlabel("Iterations")
+        plt.ylabel("Fitness function value")
+        plt.scatter(N, B_So_Far[0,C_min * TPS])
+        plt.pause(0.05)
+        plt.axis([0, itr, 10000, 15000])
+        plt.show()
+        B_OF_So_Far = B_So_Far[0, C_min * TPS]
+        print(f"Iteration number {N} with objective of {B_OF_So_Far}")
+        #print(N)
+    if N == 1:
+        print(B_OF_So_Far)
+best_sol_H = B_So_Far[0, 0: TPS * C_min]
+
+best_sol_V = best_sol_H.reshape(4, TPS)
+B_OF_So_Far = B_So_Far[0, C_min * TPS]
+print(B_OF_So_Far)
+
+TkTT_2 = np.zeros(shape=(C_min,))
+TwTT_2 = np.zeros(shape=(C_min,))
+TTwTT_2 = np.zeros(shape=(C_min, TPS))
+for i in range(0, 4):
+    Flow1[i * 4:i * 4 + 4, :] = Flow[i, :]
+for i in range(0, len(Roads)):
+    for j in range(0, TPS):
+        z = best_sol_V[i, j] - 1  # to use it in index, TLs 1 2 3 are 0 1 2 respectively
+        z = z.astype(int)  # convert z to int in order to put it as index in the matrix
+        TkTT_2[i] = sum((np.array(PIBJ[i * 4:i * 4 + C_min, z])) * (np.array(Flow1[i * 4:i * 4 + C_min, j])))  # total out from each road
+
+        TwTT_2[i] = Flow1[i * 4, j] - TkTT_2[i]  # wait at each road
+        TTwTT_2[i, j] = Flow1[i * 4, j] - TkTT_2[i]
+        if j != TPS - 1:
+            Flow1[i * 4:i * 4 + C_min, j + 1] = (Flow1[i * 4:i * 4 + C_min, j + 1]) + TwTT_2[i] * (np.ones(shape=(C_min,)))
+        sheet1.write(j, i, TTwTT_2[i, j])
+wb.save('test.xls')
+# end time
+end = time.time()
+
+# total time taken
+np.savetxt("solution.csv", best_sol_V, delimiter=",")
+np.savetxt("solution_fig.csv", DRAW, delimiter=",")
+print(f"Runtime of the program is {end - start}")
